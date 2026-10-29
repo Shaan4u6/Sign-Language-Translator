@@ -5,28 +5,32 @@ export function AboutTab() {
 
   const vivaQuestions = [
     {
-      q: 'Why translate landmark coordinates relative to the wrist (Landmark 0)?',
-      a: 'If a user shifts slightly to the left, right, up, or down in front of the camera, raw pixel coordinates change drastically even though the hand shape is identical. By subtracting the wrist (x0, y0, z0) from every landmark, the hand skeleton is pinned to the origin (0, 0, 0), providing mathematical translation invariance.'
+      q: 'How does Sianor support both one-hand and two-hand signs within a single 130-feature vector?',
+      a: 'The feature vector is partitioned into 4 distinct regions: Slot 1 (indices 0..62) holds the 63 normalized coordinates of Hand 1, Slot 2 (indices 63..125) holds the 63 coordinates of Hand 2, indices 126..128 hold the 3D displacement vector between the two wrists (scaled by average hand size), and index 129 holds a binary indicator (1.0 = both hands visible, 0.0 = single hand). For one-hand gestures, Slot 1 contains the active hand, while Slot 2, the offset, and the flag are cleanly zero-padded.'
     },
     {
-      q: 'Why scale landmarks by the maximum distance rather than a bounding box?',
-      a: 'Bounding box dimensions (width & height) change when a hand rotates or changes aspect ratio. The maximum Euclidean distance from the wrist to any landmark gives an intrinsic biometric scale factor that is rotation-independent and scale-invariant, ensuring gestures are recognized whether you are 1 foot or 5 feet from the lens.'
+      q: 'Why order detected hands by their horizontal screen position (leftmost wrist first)?',
+      a: 'If a neural network received hands in random or fluctuating order frame-to-frame, the same physical two-handed sign would produce swapped feature slots, confusing the classifier. Sorting hands by their screen wrist X-position ensures deterministic slot assignment: Slot 1 always represents the leftmost hand on screen, and Slot 2 represents the rightmost hand.'
+    },
+    {
+      q: 'Why include the 3D inter-wrist offset scaled by average hand size?',
+      a: 'Individual hands can have identical internal shapes for different signs (e.g. flat palms), but the relative distance and orientation between the two hands distinguish signs like "Please" (palms touching near chest), "Thank You" (both hands moving outward together), and "Book" (hands opening side-by-side). Dividing the raw displacement by the average hand scale ensures the inter-hand spatial relationship remains scale-invariant regardless of distance from the camera.'
+    },
+    {
+      q: 'How does dual-hand data augmentation work with slot swapping?',
+      a: 'To make the model robust against user positioning and slight posture changes, augmentation applies in-plane rotation and Gaussian jitter to both hand slots and the offset vector. Crucially, when horizontal mirroring is simulated, both hand coordinates have their X-values negated, the horizontal offset dx is inverted, and Slot 1 and Slot 2 are swapped, accurately reflecting the mirrored geometry.'
+    },
+    {
+      q: 'Why translate each hand landmark relative to its own wrist (Landmark 0)?',
+      a: 'If a user shifts slightly in front of the camera, raw pixel coordinates change drastically even though the hand shape is unchanged. By independently subtracting each hand’s wrist position (x0, y0, z0) from its 21 landmarks, the hand skeleton is pinned to the coordinate origin (0, 0, 0), achieving rigorous translation invariance.'
     },
     {
       q: 'Why use a 15-frame rolling buffer with majority voting (>80% confidence)?',
-      a: 'Real-time webcam video exhibits optical sensor noise, motion blur, and brief transitional hand movements between signs. Without temporal smoothing, the UI would flicker and trigger false speech announcements. Requiring at least 10 out of the last 15 frames to agree with >80% confidence ensures that only deliberate, stable gestures trigger speech.'
-    },
-    {
-      q: 'Why compare a manual k-NN baseline against a TensorFlow.js Neural Network?',
-      a: 'In academic machine learning projects, a baseline model (k-NN, k=5) provides an essential benchmark to prove that the deep learning Multilayer Perceptron actually learns superior generalized non-linear decision boundaries. Implementing k-NN from first principles also demonstrates deep algorithmic understanding without relying solely on black-box libraries.'
-    },
-    {
-      q: 'What is a stratified train/test split and why is it crucial for gesture recognition?',
-      a: 'A simple random split could accidentally put 90% of "Hello" samples in training and only 10% of "Stop" samples in test, causing severe class imbalance. A stratified split guarantees that every sign class is partitioned in an exact 80/20 proportion across training and test sets, yielding statistically sound, unbiased evaluation metrics.'
+      a: 'Real-time webcam video exhibits optical noise, motion blur, and brief transitional hand movements between signs. Without temporal smoothing, the UI would flicker and trigger false speech announcements. Requiring at least 10 out of the last 15 frames to agree with >80% confidence ensures that only deliberate, stable gestures trigger speech.'
     },
     {
       q: 'How does Sianor run 100% in the browser with zero backend server dependencies?',
-      a: 'MediaPipe Tasks Vision compiles Google hand tracking to WebAssembly (WASM) and WebGL shaders running directly inside the browser sandbox. TensorFlow.js utilizes WebGL/WebGPU to parallelize matrix multiplications directly on the client machine graphics hardware. The Web Speech API is natively built into modern browser engines.'
+      a: 'MediaPipe Tasks Vision compiles Google hand tracking to WebAssembly (WASM) and WebGL shaders running directly inside the browser sandbox. TensorFlow.js utilizes WebGL/WebGPU to parallelize matrix multiplications directly on client hardware. The Web Speech API is natively built into modern browser engines, ensuring total privacy and zero server latency.'
     }
   ];
 
@@ -39,101 +43,101 @@ export function AboutTab() {
             <span className="card-kicker">Academic ML Mini-Project</span>
             <h2 className="card-title-lg">How Sianor Works</h2>
           </div>
-          <span className="zero-backend-pill">100% Client-Side • Zero Backend</span>
+          <span className="zero-backend-pill">100% Client-Side • Dual-Hand ML</span>
         </div>
 
         <p className="about-intro-text">
           <strong>Sianor</strong> is an end-to-end machine learning system that translates human sign language
           into real-time written words and spoken voice. Built from the ground up for college ML curriculum,
-          every stage of the pipeline—from computer vision landmark extraction to feature normalization,
-          neural network training, evaluation, and speech synthesis—runs entirely within the user's web browser.
+          Sianor supports both <strong>one-hand and two-hand signs</strong> through an invariant 130-feature
+          biometric vector, dual-hand MediaPipe tracking, client-side neural network training, and native speech synthesis.
         </p>
 
         {/* Handcrafted SVG Pipeline Diagram */}
         <div className="pipeline-diagram-wrapper">
-          <h3 className="subcard-title">End-to-End System Architecture</h3>
+          <h3 className="subcard-title">Dual-Hand System Architecture</h3>
           <svg
             className="pipeline-svg"
-            viewBox="0 0 940 210"
+            viewBox="0 0 940 215"
             fill="none"
             xmlns="http://www.w3.org/2000/svg"
           >
-            {/* Background subtle connection rail */}
+            {/* Background connection rail */}
             <path
-              d="M80 105 L860 105"
+              d="M80 108 L860 108"
               stroke="#E2DAC9"
               strokeWidth="4"
               strokeDasharray="6 6"
             />
 
             {/* Block 1: Camera */}
-            <g transform="translate(20, 45)">
-              <rect width="125" height="110" rx="12" fill="#FAF7F2" stroke="#C85A32" strokeWidth="2.5" />
-              <text x="62" y="38" textAnchor="middle" fill="#C85A32" fontWeight="bold" fontSize="13" fontFamily="'Fraunces', serif">1. WEBCAM</text>
-              <text x="62" y="60" textAnchor="middle" fill="#1F1B18" fontSize="11" fontFamily="'DM Sans', sans-serif">640×480 @ 60fps</text>
-              <text x="62" y="78" textAnchor="middle" fill="#7C7267" fontSize="10" fontFamily="'DM Sans', sans-serif">HTML5 Video</text>
-              <circle cx="62" cy="94" r="4" fill="#C85A32" />
+            <g transform="translate(15, 45)">
+              <rect width="130" height="115" rx="12" fill="#FAF7F2" stroke="#C85A32" strokeWidth="2.5" />
+              <text x="65" y="36" textAnchor="middle" fill="#C85A32" fontWeight="bold" fontSize="13" fontFamily="'Fraunces', serif">1. WEBCAM</text>
+              <text x="65" y="58" textAnchor="middle" fill="#1F1B18" fontSize="11" fontFamily="'DM Sans', sans-serif">640×480 @ 60fps</text>
+              <text x="65" y="76" textAnchor="middle" fill="#7C7267" fontSize="10" fontFamily="'DM Sans', sans-serif">HTML5 Video</text>
+              <text x="65" y="94" textAnchor="middle" fill="#C85A32" fontSize="9" fontWeight="600" fontFamily="'DM Sans', sans-serif">1 or 2 Hands</text>
             </g>
 
             {/* Arrow 1 */}
-            <path d="M150 105 L175 105" stroke="#C85A32" strokeWidth="2.5" markerEnd="url(#arrowhead)" />
+            <path d="M150 108 L175 108" stroke="#C85A32" strokeWidth="2.5" markerEnd="url(#arrowhead)" />
 
             {/* Block 2: MediaPipe */}
             <g transform="translate(180, 45)">
-              <rect width="135" height="110" rx="12" fill="#FAF7F2" stroke="#292524" strokeWidth="2" />
-              <text x="67" y="38" textAnchor="middle" fill="#1F1B18" fontWeight="bold" fontSize="13" fontFamily="'Fraunces', serif">2. VISION</text>
-              <text x="67" y="60" textAnchor="middle" fill="#1F1B18" fontSize="11" fontFamily="'DM Sans', sans-serif">MediaPipe Hands</text>
-              <text x="67" y="78" textAnchor="middle" fill="#7C7267" fontSize="10" fontFamily="'DM Sans', sans-serif">21 3D Landmarks</text>
-              <text x="67" y="94" textAnchor="middle" fill="#C85A32" fontSize="9" fontWeight="600" fontFamily="'DM Sans', sans-serif">WASM / GPU</text>
+              <rect width="140" height="115" rx="12" fill="#FAF7F2" stroke="#292524" strokeWidth="2" />
+              <text x="70" y="36" textAnchor="middle" fill="#1F1B18" fontWeight="bold" fontSize="13" fontFamily="'Fraunces', serif">2. VISION</text>
+              <text x="70" y="58" textAnchor="middle" fill="#1F1B18" fontSize="11" fontFamily="'DM Sans', sans-serif">MediaPipe Hands</text>
+              <text x="70" y="76" textAnchor="middle" fill="#7C7267" fontSize="10" fontFamily="'DM Sans', sans-serif">numHands: 2</text>
+              <text x="70" y="94" textAnchor="middle" fill="#C85A32" fontSize="9" fontWeight="600" fontFamily="'DM Sans', sans-serif">42 3D Keypoints</text>
             </g>
 
             {/* Arrow 2 */}
-            <path d="M320 105 L345 105" stroke="#C85A32" strokeWidth="2.5" markerEnd="url(#arrowhead)" />
+            <path d="M325 108 L350 108" stroke="#C85A32" strokeWidth="2.5" markerEnd="url(#arrowhead)" />
 
             {/* Block 3: Preprocessing */}
-            <g transform="translate(350, 45)">
-              <rect width="145" height="110" rx="12" fill="#FAF7F2" stroke="#292524" strokeWidth="2" />
-              <text x="72" y="38" textAnchor="middle" fill="#1F1B18" fontWeight="bold" fontSize="13" fontFamily="'Fraunces', serif">3. NORMALIZE</text>
-              <text x="72" y="58" textAnchor="middle" fill="#1F1B18" fontSize="10" fontFamily="'DM Sans', sans-serif">• Wrist to (0,0,0)</text>
-              <text x="72" y="73" textAnchor="middle" fill="#1F1B18" fontSize="10" fontFamily="'DM Sans', sans-serif">• Scale by Max Dist</text>
-              <text x="72" y="88" textAnchor="middle" fill="#1F1B18" fontSize="10" fontFamily="'DM Sans', sans-serif">• Flip Left to Right</text>
-              <text x="72" y="101" textAnchor="middle" fill="#C85A32" fontSize="9" fontWeight="600" fontFamily="'DM Sans', sans-serif">63-D Vector</text>
+            <g transform="translate(355, 45)">
+              <rect width="155" height="115" rx="12" fill="#FAF7F2" stroke="#292524" strokeWidth="2" />
+              <text x="77" y="34" textAnchor="middle" fill="#1F1B18" fontWeight="bold" fontSize="13" fontFamily="'Fraunces', serif">3. NORMALIZE</text>
+              <text x="77" y="54" textAnchor="middle" fill="#1F1B18" fontSize="10" fontFamily="'DM Sans', sans-serif">• Slot 1: Hand 1 (63)</text>
+              <text x="77" y="69" textAnchor="middle" fill="#1F1B18" fontSize="10" fontFamily="'DM Sans', sans-serif">• Slot 2: Hand 2 (63)</text>
+              <text x="77" y="84" textAnchor="middle" fill="#1F1B18" fontSize="10" fontFamily="'DM Sans', sans-serif">• 3D Wrist Offset (3)</text>
+              <text x="77" y="100" textAnchor="middle" fill="#C85A32" fontSize="9" fontWeight="700" fontFamily="'DM Sans', sans-serif">130-D Vector</text>
             </g>
 
             {/* Arrow 3 */}
-            <path d="M500 105 L525 105" stroke="#C85A32" strokeWidth="2.5" markerEnd="url(#arrowhead)" />
+            <path d="M515 108 L540 108" stroke="#C85A32" strokeWidth="2.5" markerEnd="url(#arrowhead)" />
 
             {/* Block 4: Inference */}
-            <g transform="translate(530, 45)">
-              <rect width="135" height="110" rx="12" fill="#FAF7F2" stroke="#E09F3E" strokeWidth="2.5" />
-              <text x="67" y="38" textAnchor="middle" fill="#E09F3E" fontWeight="bold" fontSize="13" fontFamily="'Fraunces', serif">4. CLASSIFIER</text>
-              <text x="67" y="60" textAnchor="middle" fill="#1F1B18" fontSize="11" fontFamily="'DM Sans', sans-serif">Deep MLP (TF.js)</text>
-              <text x="67" y="76" textAnchor="middle" fill="#7C7267" fontSize="10" fontFamily="'DM Sans', sans-serif">63 → 128 → 64 → K</text>
-              <text x="67" y="93" textAnchor="middle" fill="#7C7267" fontSize="10" fontFamily="'DM Sans', sans-serif">or k-NN (k=5)</text>
+            <g transform="translate(545, 45)">
+              <rect width="135" height="115" rx="12" fill="#FAF7F2" stroke="#E09F3E" strokeWidth="2.5" />
+              <text x="67" y="36" textAnchor="middle" fill="#E09F3E" fontWeight="bold" fontSize="13" fontFamily="'Fraunces', serif">4. CLASSIFIER</text>
+              <text x="67" y="58" textAnchor="middle" fill="#1F1B18" fontSize="11" fontFamily="'DM Sans', sans-serif">Deep MLP (TF.js)</text>
+              <text x="67" y="76" textAnchor="middle" fill="#7C7267" fontSize="10" fontFamily="'DM Sans', sans-serif">130 → 128 → 64 → K</text>
+              <text x="67" y="94" textAnchor="middle" fill="#7C7267" fontSize="10" fontFamily="'DM Sans', sans-serif">or k-NN (k=5)</text>
             </g>
 
             {/* Arrow 4 */}
-            <path d="M670 105 L695 105" stroke="#C85A32" strokeWidth="2.5" markerEnd="url(#arrowhead)" />
+            <path d="M685 108 L710 108" stroke="#C85A32" strokeWidth="2.5" markerEnd="url(#arrowhead)" />
 
             {/* Block 5: Temporal Filter */}
-            <g transform="translate(700, 45)">
-              <rect width="115" height="110" rx="12" fill="#FAF7F2" stroke="#292524" strokeWidth="2" />
-              <text x="57" y="38" textAnchor="middle" fill="#1F1B18" fontWeight="bold" fontSize="13" fontFamily="'Fraunces', serif">5. SMOOTH</text>
-              <text x="57" y="60" textAnchor="middle" fill="#1F1B18" fontSize="11" fontFamily="'DM Sans', sans-serif">Majority Vote</text>
-              <text x="57" y="78" textAnchor="middle" fill="#7C7267" fontSize="10" fontFamily="'DM Sans', sans-serif">10 / 15 Frames</text>
+            <g transform="translate(715, 45)">
+              <rect width="115" height="115" rx="12" fill="#FAF7F2" stroke="#292524" strokeWidth="2" />
+              <text x="57" y="36" textAnchor="middle" fill="#1F1B18" fontWeight="bold" fontSize="13" fontFamily="'Fraunces', serif">5. SMOOTH</text>
+              <text x="57" y="58" textAnchor="middle" fill="#1F1B18" fontSize="11" fontFamily="'DM Sans', sans-serif">Majority Vote</text>
+              <text x="57" y="76" textAnchor="middle" fill="#7C7267" fontSize="10" fontFamily="'DM Sans', sans-serif">10 / 15 Frames</text>
               <text x="57" y="94" textAnchor="middle" fill="#C85A32" fontSize="9" fontWeight="600" fontFamily="'DM Sans', sans-serif">&gt; 0.80 Conf</text>
             </g>
 
             {/* Arrow 5 */}
-            <path d="M820 105 L840 105" stroke="#C85A32" strokeWidth="2.5" markerEnd="url(#arrowhead)" />
+            <path d="M835 108 L855 108" stroke="#C85A32" strokeWidth="2.5" markerEnd="url(#arrowhead)" />
 
             {/* Block 6: Output */}
-            <g transform="translate(845, 45)">
-              <rect width="85" height="110" rx="12" fill="#FAF7F2" stroke="#C85A32" strokeWidth="2.5" />
-              <text x="42" y="38" textAnchor="middle" fill="#C85A32" fontWeight="bold" fontSize="12" fontFamily="'Fraunces', serif">6. VOICE</text>
-              <text x="42" y="60" textAnchor="middle" fill="#1F1B18" fontSize="11" fontFamily="'DM Sans', sans-serif">Sentence</text>
-              <text x="42" y="78" textAnchor="middle" fill="#7C7267" fontSize="10" fontFamily="'DM Sans', sans-serif">Speech</text>
-              <text x="42" y="94" textAnchor="middle" fill="#1F1B18" fontSize="11" fontFamily="'DM Sans', sans-serif">Synthesis</text>
+            <g transform="translate(860, 45)">
+              <rect width="80" height="115" rx="12" fill="#FAF7F2" stroke="#C85A32" strokeWidth="2.5" />
+              <text x="40" y="36" textAnchor="middle" fill="#C85A32" fontWeight="bold" fontSize="12" fontFamily="'Fraunces', serif">6. VOICE</text>
+              <text x="40" y="58" textAnchor="middle" fill="#1F1B18" fontSize="11" fontFamily="'DM Sans', sans-serif">Sentence</text>
+              <text x="40" y="76" textAnchor="middle" fill="#7C7267" fontSize="10" fontFamily="'DM Sans', sans-serif">Speech</text>
+              <text x="40" y="94" textAnchor="middle" fill="#1F1B18" fontSize="11" fontFamily="'DM Sans', sans-serif">Synthesis</text>
             </g>
 
             {/* Marker definitions */}

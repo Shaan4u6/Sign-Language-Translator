@@ -43,7 +43,7 @@ export function TranslateTab({
   }, []);
 
   // Process incoming video frame landmarks
-  const handleFrameLandmarks = useCallback((landmarks, handedness) => {
+  const handleFrameLandmarks = useCallback((landmarks) => {
     if (!landmarks) {
       // Hand has left the frame: reset latch so next sign can be captured
       if (handPresentRef.current) {
@@ -68,8 +68,12 @@ export function TranslateTab({
     }
 
     try {
-      // Step 1: Preprocess raw landmarks to normalized 63-vector
-      const vector = normalizeLandmarks(landmarks, handedness);
+      // Step 1: Preprocess raw landmarks to normalized 130-feature vector
+      const vector = normalizeLandmarks(landmarks);
+      if (!vector) {
+        setInstantPrediction(null);
+        return;
+      }
 
       // Step 2: Infer using active model
       let result = null;

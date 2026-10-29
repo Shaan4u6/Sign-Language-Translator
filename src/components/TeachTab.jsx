@@ -52,11 +52,12 @@ export function TeachTab({
   }, [labels, dataset]);
 
   // Frame listener for landmark recording
-  const handleFrameLandmarks = useCallback((landmarks, handedness) => {
+  const handleFrameLandmarks = useCallback((landmarks) => {
     if (countdownPhase !== 'recording' || !recordingLabel || !landmarks) return;
 
     try {
-      const vector = normalizeLandmarks(landmarks, handedness);
+      const vector = normalizeLandmarks(landmarks);
+      if (!vector) return;
       accumulatedSamplesRef.current.push({
         label: recordingLabel,
         features: vector,

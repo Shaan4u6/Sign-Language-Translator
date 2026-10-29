@@ -1,32 +1,58 @@
 /**
- * Sianor Persistence & Data Transfer Service
+ * Sianor Persistence & Data Transfer Service (130-Feature Dual-Hand Version)
  * 
  * Manages:
  * - LocalStorage for custom sign labels and landmark sample dataset
- * - CSV Export: Generates downloadable comma-separated values of normalized landmark features
- * - CSV Import: Parses external gesture dataset CSV files with schema validation
- * - Model status caching
+ * - Legacy data detection and automatic purge if feature dimension !== 130
+ * - CSV Export: Generates downloadable comma-separated values of 130 dual-hand features
+ * - CSV Import: Parses dual-hand gesture dataset CSV files (130 features + label)
+ * - Auto-loading default dataset from /dataset.csv on initial startup
  */
 
-const STORAGE_KEY_DATASET = 'sianor_dataset_v1';
-const STORAGE_KEY_LABELS = 'sianor_labels_v1';
+const STORAGE_KEY_DATASET = 'sianor_dataset_v2_dual';
+const STORAGE_KEY_LABELS = 'sianor_labels_v2_dual';
+const LEGACY_STORAGE_KEY_DATASET = 'sianor_dataset_v1';
+const LEGACY_STORAGE_KEY_LABELS = 'sianor_labels_v1';
+
+export const FEATURE_SIZE = 130;
 
 /**
  * Loads the dataset from localStorage.
- * @returns {Array<{features: Float32Array, label: string}>}
+ * Automatically clears legacy 63-feature datasets.
+ * @returns {{ dataset: Array<{features: Float32Array, label: string}>, legacyCleared: boolean }}
  */
 export function loadDatasetFromStorage() {
+  let legacyCleared = false;
+
+  // Check for legacy v1 storage and purge it
+  if (localStorage.getItem(LEGACY_STORAGE_KEY_DATASET)) {
+    localStorage.removeItem(LEGACY_STORAGE_KEY_DATASET);
+    localStorage.removeItem(LEGACY_STORAGE_KEY_LABELS);
+    legacyCleared = true;
+  }
+
   try {
     const raw = localStorage.getItem(STORAGE_KEY_DATASET);
-    if (!raw) return [];
+    if (!raw) return { dataset: [], legacyCleared };
     const parsed = JSON.parse(raw);
-    return parsed.map(item => ({
+
+    // Verify all items have exactly 130 features
+    const isValid = parsed.every(item => item.features && item.features.length === FEATURE_SIZE);
+    if (!isValid) {
+      console.warn(`Stored dataset contains non-130 feature samples. Purging legacy dataset...`);
+      localStorage.removeItem(STORAGE_KEY_DATASET);
+      return { dataset: [], legacyCleared: true };
+    }
+
+    const dataset = parsed.map(item => ({
       label: item.label,
       features: new Float32Array(item.features),
     }));
+
+    return { dataset, legacyCleared };
   } catch (err) {
     console.error('Failed to load dataset from localStorage:', err);
-    return [];
+    return { dataset: [], legacyCleared };
   }
 }
 
@@ -77,22 +103,32 @@ export function saveLabelsToStorage(labels) {
 }
 
 /**
- * Exports current dataset as a CSV file.
+ * Exports current dual-hand dataset as a CSV file.
  * Format:
- * label,x0,y0,z0,x1,y1,z1,...,x20,y20,z20
+ * label,h1_x0,h1_y0,h1_z0...h1_z20,h2_x0,h2_y0...h2_z20,offset_dx,offset_dy,offset_dz,two_hands_flag (131 columns)
  * @param {Array<{features: Float32Array|number[], label: string}>} dataset
  * @param {string} filename
  */
-export function exportDatasetToCSV(dataset, filename = 'sianor_signs_dataset.csv') {
+export function exportDatasetToCSV(dataset, filename = 'sianor_dual_hand_dataset.csv') {
   if (!dataset || dataset.length === 0) {
     throw new Error('Dataset is empty, nothing to export');
   }
 
-  // Header row
+  // Header row (130 features)
   const header = ['label'];
+
+  // Hand 1 (Slot 1)
   for (let i = 0; i < 21; i++) {
-    header.push(`x${i}`, `y${i}`, `z${i}`);
+    header.push(`h1_x${i}`, `h1_y${i}`, `h1_z${i}`);
   }
+
+  // Hand 2 (Slot 2)
+  for (let i = 0; i < 21; i++) {
+    header.push(`h2_x${i}`, `h2_y${i}`, `h2_z${i}`);
+  }
+
+  // 4 Extra Features
+  header.push('offset_dx', 'offset_dy', 'offset_dz', 'two_hands_flag');
 
   const rows = [header.join(',')];
 
@@ -115,7 +151,8 @@ export function exportDatasetToCSV(dataset, filename = 'sianor_signs_dataset.csv
 }
 
 /**
- * Imports dataset from a CSV string.
+ * Imports dual-hand dataset from a CSV string.
+ * Validates 130 feature columns + label = 131 columns.
  * @param {string} csvText
  * @returns {Array<{features: Float32Array, label: string}>}
  */
@@ -127,12 +164,11 @@ export function parseCSVToDataset(csvText) {
 
   const dataset = [];
 
-  // Start from line 1 (skip header)
   for (let i = 1; i < lines.length; i++) {
     const line = lines[i].trim();
     if (!line) continue;
 
-    // Split by comma while respecting quotes
+    // Split by comma respecting quotes
     const tokens = [];
     let current = '';
     let inQuotes = false;
@@ -150,14 +186,14 @@ export function parseCSVToDataset(csvText) {
     }
     tokens.push(current.trim());
 
-    if (tokens.length < 64) {
-      console.warn(`Skipping line ${i + 1}: expected 64 columns, found ${tokens.length}`);
+    if (tokens.length < (FEATURE_SIZE + 1)) {
+      console.warn(`Skipping line ${i + 1}: expected ${FEATURE_SIZE + 1} columns, found ${tokens.length}`);
       continue;
     }
 
     const rawLabel = tokens[0].replace(/^"|"$/g, '').trim();
-    const features = new Float32Array(63);
-    for (let f = 0; f < 63; f++) {
+    const features = new Float32Array(FEATURE_SIZE);
+    for (let f = 0; f < FEATURE_SIZE; f++) {
       const val = parseFloat(tokens[f + 1]);
       features[f] = Number.isFinite(val) ? val : 0;
     }
@@ -166,4 +202,24 @@ export function parseCSVToDataset(csvText) {
   }
 
   return dataset;
+}
+
+/**
+ * Checks if /dataset.csv exists in public root and loads it if found and matching 130 features.
+ * @returns {Promise<{ dataset: Array<{features: Float32Array, label: string}>, labels: string[] } | null>}
+ */
+export async function checkAndLoadDefaultDatasetCSV() {
+  try {
+    const res = await fetch('/dataset.csv');
+    if (!res.ok) return null;
+    const text = await res.text();
+    const dataset = parseCSVToDataset(text);
+    if (!dataset || dataset.length === 0) return null;
+
+    const labels = Array.from(new Set(dataset.map(d => d.label)));
+    return { dataset, labels };
+  } catch (err) {
+    console.debug('No default /dataset.csv found or failed to parse:', err);
+    return null;
+  }
 }

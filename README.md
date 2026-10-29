@@ -8,13 +8,15 @@
 
 1. **Zero-Backend Client-Side Execution**:
    - Runs 100% in the browser sandbox. No Python backend, no Flask/FastAPI server, no external API keys, and zero cloud data transmission.
-2. **Real-Time Hand Landmark Tracking**:
-   - MediaPipe Hands (`@mediapipe/tasks-vision`) extracts 21 three-dimensional anatomical hand landmarks from standard 60 FPS webcam feeds.
-3. **Rigorous Invariant Feature Preprocessing**:
-   - Converts raw video pixels into a normalized, translation-invariant, scale-invariant, and handedness-invariant 63-dimensional feature vector.
+2. **Real-Time Dual-Hand Landmark Tracking**:
+   - MediaPipe Hands (`@mediapipe/tasks-vision`) detects up to 2 hands (`numHands: 2`) from standard 60 FPS webcam feeds with live skeleton overlays.
+3. **Rigorous Dual-Hand Invariant Feature Preprocessing (130 Features)**:
+   - Normalizes each hand independently (wrist to origin, scaled by max landmark distance).
+   - Consistently orders hands by wrist screen X-position (leftmost first). Single hand goes into Slot 1 with Slot 2 zero-padded.
+   - Computes 4 inter-hand features: scaled 3D wrist offset ($dx, dy, dz$) plus a two-hands visible flag (0 or 1). Total: $63 + 63 + 4 = 130$ features.
 4. **Dual Model Architecture**:
-   - **Baseline**: Manual $k$-Nearest Neighbors ($k$-NN, $k=5$) implemented from first principles using Euclidean distance and voting.
-   - **Deep Learning**: TensorFlow.js Multilayer Perceptron (MLP) with Dense layers, ReLU activations, Dropout (0.30), Adam optimization, and Softmax categorical cross-entropy.
+   - **Baseline**: Manual $k$-Nearest Neighbors ($k$-NN, $k=5$) implemented from first principles.
+   - **Deep Learning**: TensorFlow.js Multilayer Perceptron (MLP) with 130 inputs, Dense layers, ReLU activations, Dropout (0.30), Adam optimization, and Softmax categorical cross-entropy.
 5. **Real-Time Temporal Smoothing**:
    - 15-frame rolling buffer requiring $\ge 10$ agreeing frames with $>80\%$ confidence before accepting a gesture. Prevents optical flicker and accidental triggering.
 6. **Sentence Assembly & Speech Synthesis**:
@@ -26,9 +28,10 @@
    - Per-class Precision, Recall, and F1-score tables.
    - Interactive $N \times N$ Confusion Matrix heatmap.
 8. **Persistence & Data Portability**:
-   - Export and import gesture datasets via standard CSV.
+   - Export and import gesture datasets via standard CSV (130 features + label).
+   - "Export Model" and "Load Model" buttons to save and load TF.js model files (`.json`, `.weights.bin`, `.labels.json`).
    - Saves trained model weights directly to browser IndexedDB for automatic reload.
-   - Includes a **Load Demo Dataset** option (360 calibrated samples across 8 default gestures) for instant evaluation and demonstration.
+   - Auto-loads `public/dataset.csv` on first startup. Includes **Load Demo Dataset** option (360 dual-hand & single-hand calibrated samples across 8 gestures).
 9. **Warm Editorial Paper Aesthetic**:
    - Inspired by printed books and artisanal lab notebooks: warm paper background (`#FAF7F2`), deep ink typography (`#1F1B18`), terracotta (`#C85A32`) and marigold (`#E09F3E`) accents, Fraunces serif headings, hand-drawn SVG squiggles, and polaroid-framed video feed.
 
@@ -37,8 +40,8 @@
 ## 🛠 Tech Stack
 
 - **Framework**: React 19 + Vite (Fast HMR and production bundling)
-- **Computer Vision**: `@mediapipe/tasks-vision` (WebAssembly & WebGL hand landmarker)
-- **Machine Learning**: `@tensorflow/tfjs` (Client-side GPU/WASM tensor training & inference)
+- **Computer Vision**: `@mediapipe/tasks-vision` (WebAssembly & WebGL dual-hand landmarker, `numHands: 2`)
+- **Machine Learning**: `@tensorflow/tfjs` (Client-side GPU/WASM tensor training & inference, 130 inputs)
 - **Speech Engine**: Web Speech API (`window.speechSynthesis`)
 - **Dataset Storage**: LocalStorage (samples and labels) & IndexedDB (TensorFlow.js model artifacts)
 - **Typography**: Fraunces (Headings), DM Sans (UI), Caveat (Handwritten captions)
@@ -48,19 +51,20 @@
 ## 📐 Machine Learning Pipeline
 
 ```
-[Webcam Stream] ──> [MediaPipe Tasks Vision (21 Landmarks)]
+[Webcam Stream] ──> [MediaPipe Tasks Vision (Up to 2 Hands)]
                             │
                             ▼
-        [Mathematical Invariant Preprocessing]
-         1. Wrist Translation: P_i - P_wrist
-         2. Max-Distance Scaling: P_i / max_dist
-         3. Handedness Reflection: X = -X if Left
-         4. Flattening: [x0, y0, z0, ..., x20, y20, z20] (63-D)
+        [Mathematical Invariant Preprocessing (130-D)]
+         1. Wrist Translation: P_i - P_wrist (per hand)
+         2. Max-Distance Scaling: P_i / max_dist (per hand)
+         3. Spatial Ordering: Leftmost wrist in Slot 1 (63), Rightmost in Slot 2 (63)
+            (Single hand: Slot 1 filled, Slot 2 zero-padded)
+         4. 4 Extra Features: 3D Wrist Offset (dx, dy, dz) / avgScale + Two-Hands Flag
                             │
             ┌───────────────┴───────────────┐
             ▼                               ▼
     [k-NN Baseline (k=5)]       [TensorFlow.js Deep MLP]
-     Euclidean distance           63 -> Dense 128 (ReLU)
+     Euclidean distance (130-D)   130 -> Dense 128 (ReLU)
      Vote tallying                -> Dropout 0.3
                                   -> Dense 64 (ReLU)
                                   -> Dense K (Softmax)
@@ -74,16 +78,16 @@
 ```
 
 ### 1. Preprocessing Details (`src/ml/preprocessor.js`)
-- **Wrist Origin Centering**: Landmark 0 (wrist) is translated to $(0, 0, 0)$ via $\mathbf{p}'_i = \mathbf{p}_i - \mathbf{p}_0$. This removes screen position dependence.
-- **Biometric Scale Invariance**: We calculate $d_{\max} = \max_{i} \|\mathbf{p}'_i\|_2$ and divide all coordinates by $d_{\max}$. The gesture representation remains constant whether the user sits 1 foot or 6 feet away.
-- **Handedness Reflection**: If MediaPipe detects a left hand, the X-coordinates are reflected ($x \leftarrow -x$). This allows right-hand models to accept left-handed gestures out of the box.
-- **63-Feature Vector**: The 21 points $\times$ 3 coordinates $(x, y, z)$ are flattened into a contiguous 1D array of 63 floating-point numbers.
+- **Independent Wrist Centering**: For each hand, Landmark 0 (wrist) is translated to $(0, 0, 0)$ via $\mathbf{p}'_i = \mathbf{p}_i - \mathbf{p}_0$.
+- **Biometric Scale Invariance**: Each hand is independently scaled by its maximum Euclidean distance $d_{\max} = \max_i \|\mathbf{p}'_i\|_2$.
+- **Spatial Hand Ordering**: Hands are ordered by wrist screen $X$-position (leftmost first) so slot allocation is deterministic. If only one hand is visible, it is placed in Slot 1 and Slot 2 is filled with zeros.
+- **Inter-Wrist 3D Offset & Flag**: Computes $\Delta\mathbf{w} = (\mathbf{w}_2 - \mathbf{w}_1) / \bar{s}$, where $\bar{s} = (s_1 + s_2) / 2$. An additional binary flag indicates whether both hands are present (1.0) or single-hand (0.0). Total: $63 + 63 + 3 + 1 = 130$ features.
 
-### 2. Data Augmentation
-To improve generalizability on small collected datasets, synthetic samples can be generated by applying:
-- In-plane rotation around the $Z$-axis: $\theta \in [-12^\circ, +12^\circ]$
-- Biometric scale jitter: $s \in [0.92, 1.08]$
-- Gaussian coordinate noise: $\mathcal{N}(0, 0.015)$
+### 2. Dual-Hand Data Augmentation
+- In-plane rotation around the $Z$-axis: $\theta \in [-12^\circ, +12^\circ]$ applied to both hands and the offset vector.
+- Biometric scale jitter: $s \in [0.92, 1.08]$.
+- Gaussian coordinate noise: $\mathcal{N}(0, 0.015)$.
+- Horizontal mirroring with slot swapping: when mirrored horizontally, $x$ coordinates and $dx$ are negated and Hand 1 and Hand 2 slots are swapped.
 
 ---
 
@@ -126,16 +130,20 @@ npm run preview
 - **Model Switcher**: Toggle real-time inference between the Deep Neural Network (MLP) and the $k$-NN baseline.
 
 ### 2. Teach Tab (Data Collection)
+- **Automatic Default Dataset**: If `/public/dataset.csv` exists, Sianor automatically loads it on first startup into the local dataset.
 - **Sign Vocabulary**: Add, rename, or delete sign categories (default: *Hello, Thank You, Yes, No, I Love You, Stop, Please, OK*).
 - **10-Second Recording**: Click **Record** on any sign. A 3-second preparation countdown is followed by 10 seconds of continuous frame capture (~200 samples).
-- **CSV Portability**: Export your collected samples as CSV or import pre-existing datasets.
-- **Load Demo Dataset**: Single-click button that instantly loads 360 pre-calibrated landmark samples across all 8 standard signs.
+- **CSV Portability**: Export your collected samples as CSV or import external CSV datasets.
+- **Load Demo Dataset**: Single-click button that loads 360 pre-calibrated landmark samples across all 8 standard signs.
 
-### 3. Train Tab (Model Laboratory)
+### 3. Train Tab (Model Laboratory & Artifacts)
 - **Preprocessing Overview**: Educational cards detailing the 4 mathematical transformations.
 - **Augmentation Switch**: Enable or disable rotational, scale, and noise augmentation.
 - **Train Launch**: Trains both $k$-NN ($k=5$) and TF.js MLP (50 epochs) on an 80/20 stratified split.
 - **Live Loss & Accuracy Charts**: Real-time canvas graphs plotting training and validation metrics per epoch.
+- **Model Portability (Export & Load Model)**:
+  - **Export Model**: Downloads `sianor-hand-mlp.json` (architecture & embedded metadata), `sianor-hand-mlp.weights.bin` (binary weights), and `sianor-hand-mlp.labels.json`.
+  - **Load Model**: Select previously exported model files (`.json` + `.weights.bin`), and Sianor restores the trained weights and vocabulary immediately without retraining!
 - **Evaluation Dashboard**:
   - Side-by-side test accuracy comparison cards.
   - Per-class Precision, Recall, and F1-score table with support count.

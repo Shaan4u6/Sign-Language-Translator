@@ -1,17 +1,22 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { stratifiedSplit, computeEvaluationMetrics } from '../ml/metrics';
 import { augmentDataset } from '../ml/preprocessor';
+import { saveLabelsToStorage } from '../ml/storage';
 import { KNNClassifier } from '../ml/knn';
 import { TFHandModel } from '../ml/tfModel';
 import { TrainingCharts } from './TrainingCharts';
 import { ConfusionMatrix } from './ConfusionMatrix';
-import { BrainIcon, CheckIcon } from './Icons';
+import { BrainIcon, CheckIcon, DownloadIcon, UploadIcon } from './Icons';
 import confetti from 'canvas-confetti';
 
 export function TrainTab({
   dataset,
+  labels,
+  setLabels,
   setKnnModel,
+  tfModel,
   setTfModel,
+  modelStatus,
   setModelStatus,
   onGoToTranslate,
 }) {
@@ -25,6 +30,9 @@ export function TrainTab({
   // Post-training Evaluation Results
   const [evaluationResults, setEvaluationResults] = useState(null);
   const [savedToIndexedDb, setSavedToIndexedDb] = useState(false);
+  const [modelActionMessage, setModelActionMessage] = useState(null);
+
+  const modelFileInputRef = useRef(null);
 
   // Train workflow
   const handleTrainModels = async () => {
@@ -38,6 +46,7 @@ export function TrainTab({
     setCurrentEpoch(0);
     setEvaluationResults(null);
     setSavedToIndexedDb(false);
+    setModelActionMessage(null);
 
     try {
       // Step 1: Stratified 80/20 train/test split
@@ -129,6 +138,82 @@ export function TrainTab({
     }
   };
 
+  // Export TF.js model files (.json architecture + .weights.bin + labels.json)
+  const handleExportModel = async () => {
+    if (!tfModel || !tfModel.isTrained) {
+      alert('No trained model available to export. Train a model first or load one!');
+      return;
+    }
+
+    try {
+      await tfModel.exportModelFiles('sianor-hand-mlp');
+      setModelActionMessage('Model files downloaded: .json architecture, .weights.bin, and .labels.json');
+    } catch (err) {
+      console.error('Model export error:', err);
+      alert(`Failed to export model: ${err.message}`);
+    }
+  };
+
+  // Load TF.js model from user files
+  const handleLoadModelFiles = async (e) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+
+    try {
+      const activeMlp = tfModel || new TFHandModel();
+      const result = await activeMlp.loadModelFromFiles(files, 'sianor-hand-mlp');
+
+      setTfModel(activeMlp);
+
+      const loadedLabels = result.labels && result.labels.length > 0 ? result.labels : labels;
+      if (result.labels && result.labels.length > 0) {
+        if (setLabels) setLabels(result.labels);
+        saveLabelsToStorage(result.labels);
+      }
+
+      setModelStatus({
+        trained: true,
+        modelType: 'mlp',
+        labels: loadedLabels,
+        accuracy: null,
+      });
+
+      // If dataset has samples, evaluate loaded model on test split for immediate feedback
+      if (dataset && dataset.length >= 10) {
+        try {
+          const split = stratifiedSplit(dataset, 0.8);
+          const mlpTestPreds = activeMlp.predictAll(split.X_test);
+          const mlpMetrics = computeEvaluationMetrics(split.y_test, mlpTestPreds, split.labels);
+
+          setEvaluationResults({
+            knnMetrics: { accuracy: 0, macroAvg: { f1: 0 } },
+            mlpMetrics,
+            splitLabels: split.labels,
+            trainCount: split.X_train.length,
+            testCount: split.X_test.length,
+            originalTrainCount: split.X_train.length,
+          });
+        } catch {
+          // Evaluation optional if dataset labels differ
+        }
+      }
+
+      setModelActionMessage(`Model successfully loaded with ${loadedLabels.length} classes (${loadedLabels.join(', ')})!`);
+
+      confetti({
+        particleCount: 60,
+        spread: 60,
+        origin: { y: 0.6 },
+        colors: ['#C85A32', '#E09F3E', '#4E6E58'],
+      });
+    } catch (err) {
+      console.error('Model load error:', err);
+      alert(`Could not load model files: ${err.message}\n\nPlease select both the .json model file and the .bin weights file.`);
+    } finally {
+      e.target.value = '';
+    }
+  };
+
   return (
     <div className="train-page-container">
       {/* Top Banner: Mathematical Preprocessing Pipeline */}
@@ -138,12 +223,12 @@ export function TrainTab({
             <span className="card-kicker">Feature Engineering</span>
             <h3 className="card-title-sm">Invariant Landmark Preprocessing</h3>
           </div>
-          <span className="pipeline-badge">21 Keypoints → 63-Feature Vector</span>
+          <span className="pipeline-badge">Dual-Hand Pipeline → 130-Feature Vector</span>
         </div>
 
         <p className="card-instruction">
-          Raw pixel coordinates vary wildly with camera distance, person height, and hand position.
-          Before feeding data to our classifiers, every hand frame undergoes four normalization steps:
+          Raw video coordinates vary with camera distance, frame position, and whether one or two hands are in view.
+          Before feeding data to our classifiers, every frame undergoes four normalization steps:
         </p>
 
         <div className="pipeline-steps-grid">
@@ -151,8 +236,8 @@ export function TrainTab({
             <span className="step-num">a</span>
             <h4 className="step-title">Wrist Translation</h4>
             <p className="step-desc">
-              All 21 landmarks are translated so Landmark 0 (wrist) sits at the coordinate origin <code>(0, 0, 0)</code>.
-              Makes features translation-invariant.
+              For each hand independently, all 21 landmarks are translated so Landmark 0 (wrist) sits at origin <code>(0, 0, 0)</code>.
+              Translation-invariant!
             </p>
           </div>
 
@@ -160,26 +245,25 @@ export function TrainTab({
             <span className="step-num">b</span>
             <h4 className="step-title">Max-Distance Scaling</h4>
             <p className="step-desc">
-              Coordinates are divided by the maximum Euclidean distance from the wrist to any landmark.
+              Coordinates for each hand are divided by the maximum Euclidean distance from its wrist to any landmark.
               Ensures invariant size whether close or far.
             </p>
           </div>
 
           <div className="step-card">
             <span className="step-num">c</span>
-            <h4 className="step-title">Handedness Flip</h4>
+            <h4 className="step-title">Spatial Hand Ordering</h4>
             <p className="step-desc">
-              Left-hand samples have their X-coordinates reflected (<code>x = -x</code>) to mirror right-hand geometry.
-              Both hands work seamlessly!
+              Hands are consistently sorted by wrist screen X-position (leftmost first).
+              If only 1 hand is visible, it fills Slot 1 and Slot 2 is padded with zeros.
             </p>
           </div>
 
           <div className="step-card">
             <span className="step-num">d</span>
-            <h4 className="step-title">Vector Flattening</h4>
+            <h4 className="step-title">130-Feature Compilation</h4>
             <p className="step-desc">
-              The normalized 3D coordinates are flattened into an input array of length 63:
-              <code>[x0, y0, z0, ..., x20, y20, z20]</code>.
+              Compiles Slot 1 (63) + Slot 2 (63) + scaled 3D wrist offset (3) + two-hands flag (1) into a 130-element vector.
             </p>
           </div>
         </div>
@@ -189,8 +273,8 @@ export function TrainTab({
       <section className="sianor-card train-config-card" aria-label="Training Setup">
         <div className="card-header-row">
           <div>
-            <span className="card-kicker">Model Training</span>
-            <h3 className="card-title-sm">Training Configuration</h3>
+            <span className="card-kicker">Model Training & Portability</span>
+            <h3 className="card-title-sm">Training Configuration & Model Files</h3>
           </div>
           <div className="dataset-status-pill">
             <span>{dataset.length} total samples</span>
@@ -214,14 +298,14 @@ export function TrainTab({
                 className="sianor-toggle"
                 disabled={isTraining}
               />
-              <span className="toggle-text">Rotation (±12°), Scale (±8%), Noise</span>
+              <span className="toggle-text">Dual-Hand Rotation, Scale, Noise & Mirror</span>
             </label>
-            <span className="config-sub">Multiplies training data 3× with realistic jitter</span>
+            <span className="config-sub">Multiplies training data 3× with realistic jitter & slot swapping</span>
           </div>
 
           <div className="config-item">
             <span className="config-label">Neural Network Architecture</span>
-            <span className="config-val">Dense 128 (ReLU) → Dropout 0.3 → Dense 64 → Softmax</span>
+            <span className="config-val">130 In → Dense 128 (ReLU) → Dropout 0.3 → Dense 64 → Softmax</span>
             <span className="config-sub">Adam Optimizer (lr=0.001) • Categorical Crossentropy</span>
           </div>
 
@@ -241,6 +325,58 @@ export function TrainTab({
             </div>
           </div>
         </div>
+
+        {/* Model Portability Actions: Export & Load Model Buttons */}
+        <div className="model-file-actions-row">
+          <div className="model-file-info">
+            <span className="model-file-title">TF.js Model Files:</span>
+            <span className="model-file-status">
+              {modelStatus && modelStatus.trained
+                ? `Active model (${modelStatus.labels?.length || 0} classes)`
+                : 'No model loaded yet'}
+            </span>
+          </div>
+
+          <div className="model-file-buttons">
+            <button
+              type="button"
+              className="sianor-btn sianor-btn-secondary btn-sm"
+              onClick={handleExportModel}
+              disabled={isTraining || !tfModel || !tfModel.isTrained}
+              title="Download model.json and model.weights.bin"
+            >
+              <DownloadIcon size={16} />
+              <span>Export Model</span>
+            </button>
+
+            <button
+              type="button"
+              className="sianor-btn sianor-btn-secondary btn-sm"
+              onClick={() => modelFileInputRef.current && modelFileInputRef.current.click()}
+              disabled={isTraining}
+              title="Upload model.json and weights.bin files"
+            >
+              <UploadIcon size={16} />
+              <span>Load Model</span>
+            </button>
+
+            <input
+              ref={modelFileInputRef}
+              type="file"
+              multiple
+              accept=".json,.bin"
+              style={{ display: 'none' }}
+              onChange={handleLoadModelFiles}
+            />
+          </div>
+        </div>
+
+        {modelActionMessage && (
+          <div className="model-action-toast">
+            <CheckIcon size={15} />
+            <span>{modelActionMessage}</span>
+          </div>
+        )}
 
         <div className="train-launch-bar">
           <button

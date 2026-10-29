@@ -16,7 +16,7 @@ export function CameraView({
   const [cameraState, setCameraState] = useState('initializing'); // 'initializing' | 'active' | 'error'
   const [errorMessage, setErrorMessage] = useState('');
   const [handDetected, setHandDetected] = useState(false);
-  const [detectedHandedness, setDetectedHandedness] = useState('');
+  const [handCount, setHandCount] = useState(0);
 
   // Start / restart webcam stream
   const startCamera = useCallback(async () => {
@@ -122,7 +122,7 @@ export function CameraView({
     };
   }, []);
 
-  // Frame detection loop
+  // Frame detection loop (supports up to 2 hands)
   useEffect(() => {
     if (cameraState !== 'active') return;
 
@@ -135,7 +135,6 @@ export function CameraView({
       const canvas = canvasRef.current;
 
       if (video.readyState >= 2 && video.videoWidth > 0) {
-        // Sync canvas resolution to match video
         if (canvas.width !== video.videoWidth || canvas.height !== video.videoHeight) {
           canvas.width = video.videoWidth;
           canvas.height = video.videoHeight;
@@ -148,16 +147,17 @@ export function CameraView({
           const timestamp = performance.now();
           const detection = await detectHandInVideo(video, timestamp);
 
-          if (detection && detection.landmarks) {
+          if (detection && detection.allHands && detection.allHands.length > 0) {
             setHandDetected(true);
-            setDetectedHandedness(detection.handedness);
-            drawHandLandmarks(ctx, detection.landmarks, canvas.width, canvas.height, true);
+            setHandCount(detection.allHands.length);
+            drawHandLandmarks(ctx, detection.allHands, canvas.width, canvas.height, true);
 
             if (onFrameLandmarks) {
-              onFrameLandmarks(detection.landmarks, detection.handedness);
+              onFrameLandmarks(detection.allHands, detection.handednesses);
             }
           } else {
             setHandDetected(false);
+            setHandCount(0);
             if (onFrameLandmarks) {
               onFrameLandmarks(null, null);
             }
@@ -219,7 +219,7 @@ export function CameraView({
         {cameraState === 'initializing' && (
           <div className="camera-overlay camera-loading">
             <div className="paper-spinner" />
-            <p className="loading-text">Warming up camera & hand tracker...</p>
+            <p className="loading-text">Warming up camera & dual-hand tracker...</p>
           </div>
         )}
 
@@ -247,8 +247,8 @@ export function CameraView({
             {isRecording
               ? 'Keep gesture steady inside the frame...'
               : handDetected
-              ? `Hand locked (${detectedHandedness})`
-              : 'Show me a sign — hold hand in view'}
+              ? (handCount === 2 ? 'Dual hands locked (Left & Right)' : 'Single hand locked')
+              : 'Show me a sign — 1 or 2 hands in view'}
           </span>
           <span className="caption-sub">
             {polaroidCaption}
@@ -258,7 +258,7 @@ export function CameraView({
         <div className="caption-pill-status">
           <span className={`status-dot ${handDetected ? 'status-active' : 'status-waiting'}`} />
           <span className="text-xs">
-            {handDetected ? 'Landmarks (21/21)' : 'Searching'}
+            {handDetected ? (handCount === 2 ? '2 Hands (130-D)' : '1 Hand (Slot 1)') : 'Searching'}
           </span>
         </div>
       </div>
